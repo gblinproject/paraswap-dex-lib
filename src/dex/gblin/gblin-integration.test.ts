@@ -7,6 +7,7 @@ import { DummyDexHelper } from '../../dex-helper/index';
 import { Network, SwapSide } from '../../constants';
 import { BI_POWS } from '../../bigint-constants';
 import { Gblin } from './gblin';
+import { GblinEventPool } from './gblin-pool';
 import { GblinConfig } from './config';
 import { checkPoolPrices, checkPoolsLiquidity } from '../../../tests/utils';
 import GBLIN_LENS_ABI from '../../abi/gblin/GBLINLens.json';
@@ -129,6 +130,31 @@ describe('Gblin', function () {
         blockNumber,
       ),
     ).toBeNull();
+  });
+
+  it('reports an unreliable NAV instead of throwing when a required read fails', async function () {
+    const helper = new DummyDexHelper(network);
+    const pool = new GblinEventPool(
+      dexKey,
+      network,
+      helper,
+      helper.getLogger(dexKey),
+      vault,
+      lens,
+      GblinConfig[dexKey][network].feedAggregators,
+    );
+    const real = helper.multiWrapper.tryAggregate.bind(helper.multiWrapper);
+    jest
+      .spyOn(helper.multiWrapper, 'tryAggregate')
+      .mockImplementation(async (mandatory, calls, block) => {
+        const results = await real(mandatory, calls, block);
+        // totalEthValue reverting is what a stale price feed looks like
+        results[1] = { success: false, returnData: undefined };
+        return results;
+      });
+    const state = await pool.generateState(blockNumber);
+    expect(state.navReliable).toBe(false);
+    expect(state.navEth).toEqual(0n);
   });
 
   it('getTopPoolsForToken', async function () {
