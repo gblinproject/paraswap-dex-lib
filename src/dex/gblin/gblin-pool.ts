@@ -127,6 +127,28 @@ export class GblinEventPool extends StatefulEventSubscriber<GblinPoolState> {
       blockNumber,
     );
 
+    if (timestamp === undefined) {
+      const block = await this.dexHelper.web3Provider.eth.getBlock(blockNumber);
+      timestamp = BigInt(block.timestamp);
+    }
+
+    // A failed leg means the vault cannot price a mint right now (for instance totalEthValue
+    // reverts while a feed is stale): report an unreliable NAV instead of throwing, so pricing
+    // returns no prices for this block and the next log re-reads the state.
+    const required = [0, 1, 3, 4, 5];
+    if (required.some(i => !results[i].success)) {
+      return {
+        supply: 0n,
+        navEth: 0n,
+        lastAccrual: 0n,
+        managementFeeBps: 0n,
+        protocolFeeBps: 0n,
+        stabilityFeeBps: 0n,
+        navReliable: false,
+        timestamp,
+      };
+    }
+
     const supply = results[0].returnData as bigint;
     const totalEthValue = results[1].returnData as bigint;
     const navReliable = results[2].success
@@ -141,11 +163,6 @@ export class GblinEventPool extends StatefulEventSubscriber<GblinPoolState> {
     const ethBalance = results[6].success
       ? (results[6].returnData as bigint)
       : 0n;
-
-    if (timestamp === undefined) {
-      const block = await this.dexHelper.web3Provider.eth.getBlock(blockNumber);
-      timestamp = BigInt(block.timestamp);
-    }
 
     return {
       supply,
